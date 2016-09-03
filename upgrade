@@ -1,0 +1,8 @@
+## git config core.sparsecheckout true 
+git checkout upstreams6
+## echo 'builder/overlay-rootfs/*' > .git/info/sparse-checkout
+git pull s6upstream master
+## rm -f .git/info/sparse-checkout 
+## git config core.sparsecheckout false 
+
+

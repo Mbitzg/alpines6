@@ -1,0 +1,3 @@
+git remote add s6upstream https://github.com/just-containers/s6-overlay.git 
+
+
