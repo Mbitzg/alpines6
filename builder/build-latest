@@ -1,0 +1,129 @@
+#!/usr/bin/env bash 
+set -e
+set -x
+
+##
+## PARAMS
+##
+
+RELEASE_VERSION=${RELEASE_VERSION:-1.18.1.1}
+SKAWARE_VERSION=${RELEASE_VERSION%.*}
+SKAWARE_SOURCE=${SKAWARE_SOURCE:-https://github.com/just-containers/skaware/releases/download/v$SKAWARE_VERSION}
+
+PWD=$(pwd)
+OVERLAY_SRC_PATH=${OVERLAY_SRC_PATH:-$PWD/overlay-rootfs}
+OVERLAY_DST_PATH=${OVERLAY_DST_PATH:-$PWD/overlay-rootfs}
+
+targets=( 'amd64' 'armhf' )
+outputs=( 'portable' )
+editions=( '' 'nobin' )
+
+get_packages_with_versions_from_manifest() {
+  # manifest
+  manifest=$1
+
+  # skaware versions manifest
+  curl -R -L -o /tmp/manifest.txt ${SKAWARE_SOURCE}/$manifest
+
+  # parse manifest into s6 associative array
+  versions=()
+  while read -r line
+  do
+      key=`echo "${line}" | cut -d"=" -f1`
+      value=`echo "${line}" | cut -d"=" -f2`
+      if [[ ! -z "${key}" && ! -z "${value}" ]]; then
+          versions+=("${key}-${value}")
+      fi
+  done < /tmp/manifest.txt
+
+  # delete manifest
+  rm /tmp/manifest.txt
+
+  # output manifest as an array
+  echo ${versions[@]}
+}
+
+##
+## DOWNLOAD PACKAGES
+##
+
+# destination folder
+cd /tmp
+
+packages=($(get_packages_with_versions_from_manifest "manifest-portable.txt"))
+for package in "${packages[@]}"; do
+  for target in "${targets[@]}"; do
+    file=${package}-linux-${target}-bin.tar.gz
+    curl -R -L -O ${SKAWARE_SOURCE}/$file
+  done
+done
+
+##
+## OVERLAYS
+##
+
+for edition in "${editions[@]}"; do
+  for target in "${targets[@]}"; do
+    # overlay path and dist file
+    if [ "${edition}" == "nobin" ]; then
+      overlaydstpath="$OVERLAY_DST_PATH-nobin"
+      overlaytarpath="$HOME/dist/s6-overlay-nobin.tar.gz"
+    else
+      overlaydstpath="$OVERLAY_DST_PATH-raw"
+      overlaytarpath="$HOME/dist/s6-overlay-$target.tar.gz"
+    fi
+
+    rm -rf $overlaydstpath
+    rm -f  $overlaytarpath
+  
+    # create overlay folder
+    mkdir -p $overlaydstpath
+    mkdir -p $HOME/dist
+  
+    # copy overlay files
+    cp -a $OVERLAY_SRC_PATH/. $overlaydstpath/
+  
+    if [ "${edition}" != "nobin" ]; then
+      # skarnet versions manifest
+      packages=($(get_packages_with_versions_from_manifest "manifest-portable.txt"))
+  
+      # install required binaries for this concrete output
+      for package in "${packages[@]}"; do
+        tar xvfz /tmp/$package-linux-$target-bin.tar.gz -C $overlaydstpath
+      done
+    fi
+  
+    # create must exist directories
+    mkdir -p $overlaydstpath/etc/s6/init/env-stage2
+    mkdir -p $overlaydstpath/etc/{cont-init.d,cont-finish.d,fix-attrs.d,services.d}
+  
+    # create "supervise" directory in fdholder, its needed for no-catchall
+    # stage2 wake up
+    mkdir -p $overlaydstpath/etc/s6/services/s6-fdholderd/supervise
+    chmod 0700 $overlaydstpath/etc/s6/services/s6-fdholderd/supervise
+  
+    # fix perms for utilities
+    chmod 0755 $overlaydstpath/usr/bin/fix-attrs
+    chmod 0755 $overlaydstpath/usr/bin/logutil-{newfifo,service,service-main}
+    chmod 0755 $overlaydstpath/usr/bin/printcontenv
+    chmod 0755 $overlaydstpath/usr/bin/with-{contenv,retries}
+  
+    # fix init perms
+    chmod 0755 $overlaydstpath/init
+    chmod 0755 $overlaydstpath/etc/s6/init/init-*
+    chmod 0755 $overlaydstpath/etc/s6/init-catchall/init-*
+    chmod 0755 $overlaydstpath/etc/s6/init-no-catchall/init-*
+    chmod 0755 $overlaydstpath/etc/s6/services/.s6-svscan/{crash,finish}
+    chmod 0755 $overlaydstpath/etc/s6/services/s6-fdholderd/run
+    chmod 0755 $overlaydstpath/etc/s6/services/s6-svscan-log/run
+  
+    # dist!
+    tar --owner=root --group=root \
+        -zcvf                     \
+        $overlaytarpath           \
+        -C $overlaydstpath        \
+        ./
+  done
+done
+
+exit 0
