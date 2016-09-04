@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+docker build -t "mbitz/alpines6:e340" .
+docker build -t "mbitz/alpines6:latest" .

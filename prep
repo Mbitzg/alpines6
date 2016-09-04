@@ -1,5 +1,5 @@
 #!/usr/bin/env sh 
-
+set -x
 # create must exist directories
 mkdir -p /etc/s6/init/env-stage2
 mkdir -p /etc/cont-init.d /etc/cont-finish.d /etc/fix-attrs.d /etc/services.d
